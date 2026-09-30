@@ -72,6 +72,8 @@ Assert (([regex]::Matches($toml, 'LEAN_CTX_HEADLESS')).Count -eq 1) 'config.toml
 Assert ($toml -match '(?s)\[mcp_servers\.lean-ctx\.env\]\s*\nLEAN_CTX_HEADLESS = "1"') 'config.toml : placé dans [mcp_servers.lean-ctx.env]'
 Assert ($toml -match 'model = "gpt-5.5"' -and $toml -match 'command = "other"') 'config.toml : reste conservé'
 
+Assert (@(Get-ChildItem $root -Directory -Filter 'lean-ctx-fix-backup-*').Count -eq 1) '2e passage sur un état propre : aucune écriture ni sauvegarde'
+
 & pwsh -NoProfile -File $fix -Root $root -Check | Out-Null
 Assert ($LASTEXITCODE -eq 0) '-Check renvoie 0 une fois corrigé'
 

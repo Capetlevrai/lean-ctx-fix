@@ -20,9 +20,12 @@
 
 .PARAMETER Check
   N'écrit rien, affiche seulement l'état. Code de sortie 1 si des hooks lean-ctx sont présents,
-  si Grep/Glob sont bloqués ou si LEAN_CTX_HEADLESS manque.
+  si Grep/Glob sont bloqués, si LEAN_CTX_HEADLESS manque ou si les règles ne sont pas à jour.
+
+.PARAMETER Force
+  Réapplique tout même si l'état est déjà propre (par défaut : ne touche à rien, pas de sauvegarde).
 #>
-param([switch]$Check, [string]$Root = $HOME)
+param([switch]$Check, [switch]$Force, [string]$Root = $HOME)
 
 $ErrorActionPreference = 'Stop'
 $claudeSettings = Join-Path $Root '.claude/settings.json'
@@ -102,26 +105,45 @@ function Set-RuleBlock($path) {
   if ($new -ne $txt) { Set-Content $path $new -Encoding utf8NoBOM -NoNewline; 'updated' } else { 'ok' }
 }
 
-# --- état avant
-$before = [ordered]@{
-  'Claude hooks lean-ctx' = Count-LeanHooks $claudeSettings
-  'Codex hooks lean-ctx'  = Count-LeanHooks $codexHooks
+function Test-RuleBlock($path) {
+  -not (Test-Path $path) -or (Get-Content $path -Raw).Contains($ruleBlock.Trim())
 }
-if ($Check) {
+
+function Get-State {
   $deny = if (Test-Path $claudeSettings) { @((Get-Content $claudeSettings -Raw | ConvertFrom-Json -AsHashtable).permissions.deny) -join ',' } else { '' }
-  $before['Claude deny'] = if ($deny) { $deny } else { '(none)' }
-  $claudeHeadless = $false
+  $claudeHeadless = $true   # pas de serveur lean-ctx = rien à faire
   if (Test-Path $claudeJson) {
     $srv = (Get-Content $claudeJson -Raw | ConvertFrom-Json -AsHashtable).mcpServers
-    $claudeHeadless = [bool]($srv -and $srv['lean-ctx'] -and $srv['lean-ctx'].env -and $srv['lean-ctx'].env['LEAN_CTX_HEADLESS'] -eq '1')
+    if ($srv -and $srv['lean-ctx']) {
+      $claudeHeadless = [bool]($srv['lean-ctx'].env -and $srv['lean-ctx'].env['LEAN_CTX_HEADLESS'] -eq '1')
+    }
   }
-  $codexHeadless  = (Test-Path $codexConfig) -and ((Get-Content $codexConfig -Raw) -match 'LEAN_CTX_HEADLESS\s*=\s*"1"')
-  $before['Claude MCP headless'] = $claudeHeadless
-  $before['Codex MCP headless']  = $codexHeadless
+  $codexHeadless = $true
+  if ((Test-Path $codexConfig) -and ((Get-Content $codexConfig -Raw) -match '(?m)^\[mcp_servers\.lean-ctx\]')) {
+    $codexHeadless = (Get-Content $codexConfig -Raw) -match 'LEAN_CTX_HEADLESS\s*=\s*"1"'
+  }
+  $s = [ordered]@{
+    'Claude hooks lean-ctx' = Count-LeanHooks $claudeSettings
+    'Codex hooks lean-ctx'  = Count-LeanHooks $codexHooks
+    'Claude deny'           = if ($deny) { $deny } else { '(none)' }
+    'Claude MCP headless'   = $claudeHeadless
+    'Codex MCP headless'    = $codexHeadless
+    'Règles à jour'         = (Test-RuleBlock $claudeMd) -and (Test-RuleBlock $codexAgents)
+  }
+  $s['Propre'] = $s['Claude hooks lean-ctx'] + $s['Codex hooks lean-ctx'] -eq 0 -and $deny -notmatch '\b(Grep|Glob)\b' -and
+                 $claudeHeadless -and $codexHeadless -and $s['Règles à jour']
+  $s
+}
+
+# --- état avant
+$before = Get-State
+if ($Check) {
   $before | Format-Table -HideTableHeaders | Out-String | Write-Host
-  $bad = ($before['Claude hooks lean-ctx'] + $before['Codex hooks lean-ctx']) -gt 0 -or $deny -match '\b(Grep|Glob)\b' -or
-         ((Test-Path $claudeJson) -and -not $claudeHeadless) -or ((Test-Path $codexConfig) -and -not $codexHeadless)
-  exit ([int]$bad)
+  exit ([int](-not $before['Propre']))
+}
+if ($before['Propre'] -and -not $Force) {
+  Write-Host "$(Get-Date -Format s) lean-ctx-fix : rien à corriger."
+  exit 0
 }
 
 # --- sauvegarde
@@ -169,6 +191,7 @@ if ($lc) {
 }
 
 # --- rapport
+Write-Host "$(Get-Date -Format s) lean-ctx-fix : correction appliquée."
 [ordered]@{
   'Sauvegarde'                    = $backup
   'Claude hooks lean-ctx (avant)' = $before['Claude hooks lean-ctx']
