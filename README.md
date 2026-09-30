@@ -1,176 +1,175 @@
 # lean-ctx-fix
 
-**Rend [lean-ctx](https://github.com/yvgude/lean-ctx) optionnel au lieu d'omniprésent dans Claude Code et Codex CLI, et le garde comme ça même quand lean-ctx se met à jour.**
+**Désinstaller proprement [lean-ctx](https://github.com/yvgude/lean-ctx) de Claude Code, Codex et des autres agents IA, ou à défaut le rendre optionnel.**
 
-## À quoi sert ce fix
+## Pourquoi
 
-Une fois installé, lean-ctx s'insère dans **chaque** action de l'agent :
+lean-ctx promet d'économiser des tokens en compressant ce que l'agent lit. En pratique, une fois installé, il s'insère dans **chaque** action :
 
-- des hooks tournent avant et après chaque commande shell, lecture ou recherche. Chacun ajoute 75 à 120 ms ;
+- des hooks tournent avant et après chaque commande shell, lecture ou recherche, avec 75 à 120 ms de latence chacun ;
 - `Grep` et `Glob` sont bloqués, ce qui force des détours par les outils `ctx_*` ;
 - des consignes « ALWAYS use ctx_* » sont injectées à chaque session et à chaque message ;
 - le hook shell **auto-approuve toutes les commandes Bash**, en contournant les demandes d'autorisation de Claude Code ;
-- les hooks se **réinstallent tout seuls**, à chaque démarrage de session et à chaque `lean-ctx update`, `setup` ou `doctor --fix`.
+- il se **réinstalle tout seul**, au démarrage de son serveur MCP et à chaque `update`, `setup` ou `doctor --fix`.
 
-Résultat : les agents sont plus lents, pour un gain en tokens faible avec les modèles récents d'Anthropic et d'OpenAI.
+Avec les modèles récents d'Anthropic et d'OpenAI, qui gèrent déjà bien leur contexte, le gain en tokens ne compense pas la perte de vitesse. **Recommandation : désinstaller lean-ctx et rester sur les outils natifs.**
 
-**Après le fix :**
+Ce repo propose deux options :
 
-| | |
-|---|---|
-| ✅ | Outils natifs par défaut (Read, Grep, Glob, Bash…), sans hook |
-| ✅ | lean-ctx reste installé et disponible **à la demande** : « lance les tests via ctx_shell » |
-| ✅ | Le serveur MCP ne se reconfigure plus tout seul (`LEAN_CTX_HEADLESS=1`) |
-| ✅ | Une tâche planifiée réapplique le fix après chaque mise à jour de lean-ctx |
-| ✅ | Tes autres hooks, permissions et consignes sont conservés. Tout est sauvegardé avant modification. |
+| | Option | Script |
+|---|---|---|
+| ⭐ | **Désinstaller complètement** (recommandé) | `uninstall.ps1` |
+| | Garder lean-ctx installé, mais à la demande seulement | `fix.ps1` + `install-autofix.ps1` |
 
 Testé sous Windows 11 avec PowerShell 7, lean-ctx 3.10.5, Claude Code et Codex CLI.
 
 ---
 
-## Installation sur un autre ordinateur : prompt à copier-coller
+## ⭐ Désinstaller lean-ctx complètement
 
-Ouvre **Claude Code** ou **Codex** sur la machine cible et colle ce prompt tel quel :
+### Prompt à copier-coller (sur chaque ordinateur)
+
+Ouvre **Claude Code** ou **Codex** sur la machine et colle ce prompt tel quel :
 
 ````text
-Applique le fix lean-ctx de https://github.com/Capetlevrai/lean-ctx-fix sur cet ordinateur, proprement et de façon durable.
-
-Contexte : lean-ctx installe des hooks sur chaque appel d'outil (Claude Code et Codex), bloque Grep/Glob, injecte des consignes « ALWAYS use ctx_* » et se réinstalle tout seul à chaque `lean-ctx update`, `setup`, `doctor --fix` et à chaque démarrage de son serveur MCP. Je veux garder lean-ctx installé, mais à la demande seulement.
+Désinstalle complètement lean-ctx de cet ordinateur en suivant https://github.com/Capetlevrai/lean-ctx-fix (section « Désinstaller lean-ctx complètement »).
 
 Étapes :
 1. Clone le repo dans ~/lean-ctx-fix (ou fais un `git pull` s'il existe déjà) et lis le README en entier.
-2. Vérifie les prérequis : PowerShell 7 (`pwsh`), lean-ctx installé (`lean-ctx --version`). Si lean-ctx n'est pas installé, arrête-toi et dis-le-moi : il n'y a rien à corriger.
-3. Mets lean-ctx à jour AVANT d'appliquer le fix, parce qu'une mise à jour annule le fix :
-   - compare la version installée à la dernière release GitHub (https://api.github.com/repos/yvgude/lean-ctx/releases/latest) ;
-   - mets à jour par la même méthode que l'installation d'origine (paquet npm `lean-ctx-bin`, `lean-ctx update`, cargo ou brew). Sous Windows, lance `npm i -g lean-ctx-bin@latest` depuis PowerShell et non depuis Git Bash, sinon l'extraction du binaire échoue.
-4. Lance `pwsh -File ~/lean-ctx-fix/tests/test-fix.ps1` : tous les tests doivent passer.
-5. Lance `pwsh -File ~/lean-ctx-fix/fix.ps1 -Check`, puis `pwsh -File ~/lean-ctx-fix/fix.ps1`, puis de nouveau `-Check`, qui doit renvoyer `Propre True`.
-6. Si la version de lean-ctx est plus récente que celle testée dans le README (3.10.5), vérifie que le fix tient toujours :
-   - `lean-ctx config validate` ne doit signaler aucune clé inconnue ;
-   - lance une session headless (`claude -p "reply ok"` et/ou `codex exec --skip-git-repo-check "reply ok"`), puis relance `fix.ps1 -Check` : il doit rester `Propre True` ;
-   - si les hooks reviennent quand même, cherche dans le code source et le CHANGELOG de lean-ctx ce qui les réinstalle (`refresh_installed_hooks`, `LEAN_CTX_HEADLESS`, nouvelles options de config). Adapte le fix, relance les tests et propose-moi la modification du repo au lieu de bricoler en local.
-7. Sous Windows, installe la réapplication automatique avec `pwsh -File ~/lean-ctx-fix/install-autofix.ps1`. Sous macOS/Linux, propose un équivalent (launchd ou cron qui lance `pwsh -File ~/lean-ctx-fix/fix.ps1` à la connexion et toutes les 30 min) et installe-le seulement si pwsh est disponible.
-8. Test de bout en bout : lance une commande Bash simple dans une session Claude Code headless avec `--output-format stream-json --verbose --include-hook-events`. Vérifie qu'aucun hook lean-ctx n'apparaît et que la commande n'est pas réécrite. Vérifie aussi que l'outil MCP `ctx_shell` fonctionne quand on le demande explicitement.
+2. Vérifie les prérequis : PowerShell 7 (`pwsh`) et git. Si pwsh est absent (macOS/Linux), suis la procédure manuelle du README au lieu des scripts.
+3. Fais un état des lieux avec `pwsh -File ~/lean-ctx-fix/uninstall.ps1 -Check`. Si le résultat est « aucune trace », arrête-toi et dis-le-moi.
+4. Si lean-ctx est installé, note sa version (`lean-ctx --version`). Si elle est plus récente que 3.10.5, lance d'abord `lean-ctx uninstall --dry-run` et compare avec le README pour repérer ce qui aurait changé.
+5. Lance les tests : `pwsh -File ~/lean-ctx-fix/tests/test-uninstall.ps1`. Tous doivent passer.
+6. Lance la désinstallation : `pwsh -File ~/lean-ctx-fix/uninstall.ps1`. Le script sauvegarde tout, lance `lean-ctx uninstall`, retire le paquet npm ou cargo, puis nettoie les restes que l'uninstall officiel oublie.
+7. Vérifie :
+   - `pwsh -File ~/lean-ctx-fix/uninstall.ps1 -Check` doit afficher « aucune trace » ;
+   - `lean-ctx` ne doit plus exister comme commande ;
+   - un nouveau terminal PowerShell doit s'ouvrir sans erreur ;
+   - `claude -p "Use the Bash tool to run exactly: git --version" --allowedTools "Bash(git --version)"` et `codex exec --skip-git-repo-check "Run: git --version"` doivent répondre normalement, sans erreur de serveur MCP lean-ctx.
+8. S'il reste des traces, cherche-les de façon ciblée, uniquement dans les fichiers de config des agents. Ne scanne pas tout le dossier utilisateur : les venv et node_modules rendent ça très long. Nettoie seulement les entrées lean-ctx et montre-moi ce que tu as retiré.
 
 Règles :
-- Ne désinstalle pas lean-ctx et ne retire pas son serveur MCP.
-- Ne touche à aucun autre hook, permission ou consigne que ceux de lean-ctx.
-- Ne supprime pas les sauvegardes `~/lean-ctx-fix-backup-*`.
-- À la fin, donne-moi un résumé court : version de lean-ctx, résultat de chaque étape, et ce que je dois faire (redémarrer Claude Code et Codex).
+- Ne touche à aucun autre hook, serveur MCP, permission ou consigne que ceux de lean-ctx.
+- Si un fichier de règles (CLAUDE.md, AGENTS.md, GEMINI.md…) contient autre chose que lean-ctx, garde le reste.
+- Ne supprime pas les sauvegardes `~/lean-ctx-uninstall-backup-*`.
+- À la fin, donne-moi un résumé court : version désinstallée, ce qui a été retiré, résultat des vérifications, et rappelle-moi de redémarrer Claude Code, Codex et mes terminaux.
 ````
 
----
-
-## Installation manuelle (Windows)
+### Procédure manuelle (Windows)
 
 ```powershell
 git clone https://github.com/Capetlevrai/lean-ctx-fix $HOME\lean-ctx-fix
 cd $HOME\lean-ctx-fix
 
-pwsh -File .\fix.ps1 -Check          # état actuel (code 1 = à corriger)
-pwsh -File .\fix.ps1                 # applique la correction
-pwsh -File .\install-autofix.ps1     # réapplication automatique après les updates
+pwsh -File .\uninstall.ps1 -Check   # état des lieux (code 1 = il reste quelque chose)
+pwsh -File .\uninstall.ps1          # désinstallation complète + nettoyage + vérification
 ```
 
-Redémarre ensuite Claude Code et Codex.
+Redémarre ensuite Claude Code, Codex et tes terminaux.
 
-Pour utiliser lean-ctx ponctuellement, demande-le à l'agent : « utilise ctx_shell pour lancer le build ».
+### Ce que fait `uninstall.ps1`
 
-## Et quand lean-ctx se met à jour ?
+1. **Supprime la tâche planifiée `lean-ctx-fix`**, si l'option « à la demande » avait été installée. Sinon elle réécrirait des règles.
+2. **Sauvegarde** tous les fichiers concernés dans `~/lean-ctx-uninstall-backup-<date>/`. C'est important : `lean-ctx uninstall` supprime ses propres fichiers `.lean-ctx.bak` à la fin.
+3. **Lance `lean-ctx uninstall`**, la désinstallation officielle. Elle arrête le daemon, retire les serveurs MCP et les règles de tous les agents détectés (Claude Code, Codex, Cursor, Gemini, Copilot, OpenCode, VS Code, JetBrains, Hermes, Antigravity, Roo, Amp, Grok…), et supprime les hooks, les skills et les données.
+4. **Retire le paquet** npm (`lean-ctx-bin` / `lean-ctx`) ou cargo. L'uninstall officiel ne peut pas supprimer son propre binaire pendant qu'il tourne.
+5. **Nettoie les restes** que l'uninstall officiel oublie (constatés en v3.10.5) :
 
-`lean-ctx update`, `setup` et `doctor --fix` remettent les hooks et retirent `LEAN_CTX_HEADLESS`. En v3.10.5, aucune option de config ne l'empêche. Deux filets de sécurité :
+| Reste | Où |
+|---|---|
+| Ligne orpheline `if ((Test-Path $leanCtxHook) …)` | Profil PowerShell : le marqueur de fin manquait, et l'uninstall ne l'enlève pas |
+| Règles au format v10 (`# lean-ctx — Context Engineering Layer` avant le marqueur) | `~/.gemini/GEMINI.md`, `~/.copilot/instructions.md`, `~/.config/opencode/AGENTS.md` |
+| Règles à l'ancien format | `~/.hermes/HERMES.md` |
+| Blocs `<!-- lean-ctx -->` restants, dont ceux de l'option « à la demande » | `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` |
+| Plugin désactivé et skill | `~/.config/opencode/plugins/lean-ctx.ts.disabled`, `~/.config/opencode/skills/lean-ctx/` |
+| Hooks, permissions `mcp__lean-ctx__*`, serveurs MCP | `settings.json`, `.claude.json`, `hooks.json`, `config.toml`, configs MCP des autres agents |
 
-1. **La tâche planifiée `lean-ctx-fix`** (`install-autofix.ps1`) relance `fix.ps1` à l'ouverture de session et toutes les 30 min. Si tout est déjà propre, elle ne touche à rien : aucune écriture, aucune sauvegarde. Chaque passage est noté dans `~/lean-ctx-fix.log`, ce qui permet de voir quand une mise à jour a tout remis.
-2. **Manuellement**, juste après une mise à jour : `pwsh -File ~/lean-ctx-fix/fix.ps1`.
+   Un fichier qui ne contenait que du lean-ctx est supprimé. Sinon, seul le bloc lean-ctx est retiré.
 
-Entre une mise à jour et le passage suivant de la tâche (30 min au plus), les sessions qui démarrent peuvent retrouver les hooks. Après un update, relance le fix à la main pour ne pas attendre.
+6. **Vérifie** qu'il ne reste rien et affiche le rapport.
 
-Les réglages de `~/.config/lean-ctx/config.toml` posés par le fix (`shadow_mode=false`, etc.) survivent aux mises à jour.
+Les tests (`tests/test-uninstall.ps1`, 22 points) reproduisent tous ces restes sur un faux dossier utilisateur. Ils vérifient que tout est retiré et que le reste est conservé : autres hooks, autres serveurs MCP, autres permissions, tes consignes, et les projets dont le chemin contient « lean-ctx ».
+
+### Procédure manuelle sans PowerShell 7 (macOS/Linux)
+
+1. Sauvegarde `~/.claude`, `~/.claude.json`, `~/.codex`, `~/.gemini`, `~/.copilot`, `~/.config/opencode`, `~/.hermes` et tes fichiers rc de shell.
+2. `lean-ctx uninstall --dry-run`, puis `lean-ctx uninstall`.
+3. Retire le binaire selon sa méthode d'installation : `npm uninstall -g lean-ctx-bin`, `cargo uninstall lean-ctx` ou `brew uninstall lean-ctx`.
+4. Cherche les restes de façon ciblée, avec `grep -l "lean-ctx"` sur les fichiers listés dans le tableau ci-dessus et sur `~/.zshrc`, `~/.bashrc` et `~/.zshenv`. Retire uniquement les blocs lean-ctx.
+5. Vérifie : `command -v lean-ctx` ne doit rien afficher, et un nouveau terminal doit s'ouvrir sans erreur.
+
+### Validation sur une vraie machine (30/09/2026, lean-ctx 3.10.5)
+
+| Vérification | Résultat |
+|---|---|
+| `lean-ctx uninstall` | 14 configs MCP, 14 fichiers de règles, 5 skills et 5 dossiers de données retirés |
+| Restes trouvés ensuite | Ligne orpheline du profil PowerShell, 4 fichiers de règles v10 ou anciens, plugin et skill OpenCode, paquet npm |
+| `uninstall.ps1 -Check` après nettoyage | « aucune trace » |
+| Claude Code (`claude -p` + Bash) | OK, tous les serveurs MCP démarrent, aucune trace de lean-ctx |
+| Codex (`codex exec` + shell) | OK, aucune trace de lean-ctx |
+| Nouveau terminal PowerShell | S'ouvre sans erreur |
 
 ---
 
-## Détails techniques
+## Alternative : garder lean-ctx, mais à la demande
 
-### Ce que lean-ctx installe
+À n'utiliser que si tu veux garder lean-ctx pour les très grosses sorties (logs, builds, suites de tests) en l'appelant explicitement.
 
-| Où | Ce que ça fait |
-|---|---|
-| `~/.claude/settings.json` → `hooks` | 9 hooks : `observe` après **chaque** outil et à chaque message, `rewrite` avant chaque Bash/PowerShell, `redirect` avant chaque Read/Grep/Glob |
-| `~/.claude/settings.json` → `permissions.deny` | Bloque `Grep` et `Glob` |
-| `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` | Consignes « Replace Mode », « ALWAYS use ctx_* » |
-| Réponse `initialize` du serveur MCP | Bloc d'environ 2 300 caractères, « CRITICAL: ALWAYS use lean-ctx ctx_* tools… NEVER use built-in Read/Grep/Shell/Glob », dans chaque session |
-| Hook `UserPromptSubmit` | Rappel « ctx_* obligatoires » réinjecté à chaque message |
-| `~/.codex/hooks.json` | `codex-pretooluse` avant chaque Bash, Read, Grep et Glob (timeout 15 s), plus un hook au démarrage de session |
+```powershell
+pwsh -File .\fix.ps1 -Check          # état actuel (code 1 = à corriger)
+pwsh -File .\fix.ps1                 # retire hooks, deny et consignes imposées ; garde le serveur MCP
+pwsh -File .\install-autofix.ps1     # réapplique le fix après chaque mise à jour de lean-ctx
+```
 
-### Latence mesurée (Windows 11, 10 appels, médiane)
-
-| Hook | Latence par appel |
-|---|---|
-| `lean-ctx hook observe` | ~75 ms |
-| `lean-ctx hook redirect` | ~77 ms |
-| `lean-ctx hook rewrite` (Claude) | ~118 ms |
-| `lean-ctx hook codex-pretooluse` | ~117 ms |
-
-Une commande Bash dans Claude Code coûtait environ 190 ms de hooks, plus l'enveloppe `lean-ctx.exe -c '<cmd>'`. Le plus gros coût reste le **comportement** imposé au modèle : charger des outils MCP différés, faire des détours par `ctx_compose` et `ctx_read`, se passer de Grep et Glob.
-
-### Auto-approbation des commandes shell
-
-Le hook `rewrite` renvoie `"permissionDecision": "allow"` pour toutes les commandes Bash qu'il réécrit. Sans lui, Claude Code redemande l'autorisation normalement, sauf en mode bypass ou pour les règles déjà dans `permissions.allow`.
-
-### Pourquoi les hooks reviennent
-
-1. **`lean-ctx update`, `setup` et `doctor --fix`** réinstallent les hooks Claude et Codex, et réécrivent la config MCP.
-2. **Le serveur MCP, à chaque démarrage de session** : `server_handler.rs` appelle `hooks::refresh_installed_hooks()`, qui réinstalle les hooks Claude dès que `~/.claude/settings.json` contient la chaîne `lean-ctx`. Il suffit d'une permission `mcp__lean-ctx__…` pour que ça se déclenche. Vérifié : juste après le retrait des hooks, un simple `claude -p "reply ok"` les remet. Avec `--strict-mcp-config`, qui désactive les serveurs MCP, ça n'arrive plus.
-
-   L'interrupteur documenté est **`LEAN_CTX_HEADLESS=1`** dans l'environnement du serveur MCP : il saute toute l'auto-config (règles, skills, hooks, vérification de version), et les outils MCP restent fonctionnels.
+<details>
+<summary>Détails de l'option « à la demande »</summary>
 
 ### Ce que modifie `fix.ps1`
 
 | Fichier | Modification |
 |---|---|
-| `~/.claude/settings.json` | Retire les hooks dont la commande contient `lean-ctx` (les autres sont conservés). Retire `Grep` et `Glob` de `permissions.deny` (les autres deny sont conservés). |
+| `~/.claude/settings.json` | Retire les hooks lean-ctx (les autres sont conservés). Retire `Grep` et `Glob` de `permissions.deny`. |
 | `~/.codex/hooks.json` | Retire les hooks lean-ctx |
 | `~/.claude.json` | Serveur `lean-ctx` : ajoute `env.LEAN_CTX_HEADLESS = "1"`, retire le champ `instructions` statique |
 | `~/.codex/config.toml` | Ajoute `LEAN_CTX_HEADLESS = "1"` dans `[mcp_servers.lean-ctx.env]` |
-| `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` | Remplace le bloc `<!-- lean-ctx -->…<!-- /lean-ctx -->` par « outils natifs par défaut, lean-ctx à la demande ». Le reste du fichier est conservé. |
-| `~/.codex/LEAN-CTX.md` | Même consigne |
-| `~/.config/lean-ctx/config.toml` | `shadow_mode=false`, `prompt_reinject=off`, `bypass_hints=off`, `read_redirect=off`, `rules_injection=off`, `setup.auto_inject_rules=false` (ce dernier supprime aussi le bloc « CRITICAL » de la réponse MCP) |
+| `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` | Remplace le bloc lean-ctx par « outils natifs par défaut, lean-ctx à la demande » |
+| `~/.config/lean-ctx/config.toml` | `shadow_mode=false`, `prompt_reinject=off`, `bypass_hints=off`, `read_redirect=off`, `rules_injection=off`, `setup.auto_inject_rules=false` |
 
-Options : `-Check` (lecture seule, code 1 s'il y a quelque chose à corriger), `-Force` (réapplique même si tout est propre), `-Root <dossier>` (autre dossier racine, utile pour les tests).
+Options : `-Check`, `-Force` (réapplique même si tout est propre), `-Root <dossier>` (tests). Si tout est déjà propre, le script ne modifie rien et ne crée pas de sauvegarde. Si lean-ctx n'est pas installé, il ne fait rien.
+
+### Pourquoi les hooks reviennent
+
+1. `lean-ctx update`, `setup` et `doctor --fix` réinstallent les hooks et retirent `LEAN_CTX_HEADLESS`. En v3.10.5, aucune option ne l'empêche.
+2. **Le serveur MCP, à chaque démarrage de session** : `hooks::refresh_installed_hooks()` réinstalle les hooks Claude dès que `~/.claude/settings.json` contient la chaîne `lean-ctx`, ne serait-ce qu'une permission `mcp__lean-ctx__…`. Seul `LEAN_CTX_HEADLESS=1` dans l'environnement du serveur MCP l'en empêche.
+
+D'où la tâche planifiée `install-autofix.ps1`. Elle relance `fix.ps1` à l'ouverture de session et toutes les 30 min, écrit un journal dans `~/lean-ctx-fix.log`, et n'ouvre aucune fenêtre. Pour la retirer : `install-autofix.ps1 -Uninstall`.
+
+### Latence mesurée des hooks (Windows 11, médiane sur 10 appels)
+
+| Hook | Latence |
+|---|---|
+| `observe` | ~75 ms |
+| `redirect` | ~77 ms |
+| `rewrite` (Claude) | ~118 ms |
+| `codex-pretooluse` | ~117 ms |
+
+Le hook `rewrite` renvoie `"permissionDecision": "allow"` : il auto-approuve toutes les commandes Bash qu'il réécrit.
+
+Tests : `tests/test-fix.ps1` (18 points).
+
+</details>
 
 ---
 
 ## Tests
 
 ```powershell
-pwsh -File .\tests\test-fix.ps1
+pwsh -File .\tests\test-uninstall.ps1   # 22 points
+pwsh -File .\tests\test-fix.ps1         # 18 points
 ```
 
-Le test crée un faux `$HOME` avec des hooks mixtes (lean-ctx et autres), un deny mixte, un `.claude.json` et un `config.toml`. Il applique le fix deux fois et vérifie 18 points : suppression ciblée, conservation du reste, idempotence, absence de sauvegarde quand tout est propre, et code de retour de `-Check`.
+Les deux tests travaillent sur un faux dossier utilisateur temporaire et ne touchent pas à ta vraie config.
 
-### Validation de bout en bout (30/09/2026, lean-ctx 3.10.5)
+## Revenir en arrière
 
-| Test | Résultat |
-|---|---|
-| `claude -p` + Bash `git --version` | Bash natif, **aucun hook lean-ctx** dans le flux (`--include-hook-events`), commande non réécrite |
-| `claude -p` + « utilise ctx_shell » | `mcp__lean-ctx__ctx_shell` fonctionne : serveur MCP `connected` |
-| Hooks après plusieurs sessions Claude | Toujours 0 : `LEAN_CTX_HEADLESS` empêche la réinstallation |
-| `codex exec` + `git --version` | Shell natif, aucune trace de lean-ctx |
-| `lean-ctx doctor --fix`, puis tâche planifiée | doctor remet 9 hooks Claude et 5 hooks Codex et retire HEADLESS. La tâche revient à `Propre True`. |
-| `lean-ctx doctor` | 42/42 checks OK |
-
----
-
-## Désinstaller et revenir en arrière
-
-```powershell
-pwsh -File .\install-autofix.ps1 -Uninstall   # retire la tâche planifiée
-```
-
-Pour restaurer la config d'avant le fix, recopie les fichiers depuis `~/lean-ctx-fix-backup-<date>/`. Chaque copie est préfixée par son dossier d'origine : `.claude_settings.json` va dans `~/.claude/settings.json`, `.codex_hooks.json` dans `~/.codex/hooks.json`, `<utilisateur>_.claude.json` dans `~/.claude.json`, etc. Tu peux aussi relancer `lean-ctx setup` pour tout réinstaller.
-
-## Limites
-
-- Les scripts sont écrits pour Windows et PowerShell 7. Sur macOS/Linux, `fix.ps1` fonctionne si `pwsh` est installé, mais `install-autofix.ps1` est propre à Windows.
-- Les autres agents où lean-ctx est enregistré (Cursor, Gemini CLI, Copilot, OpenCode…) ne sont pas touchés.
-- Le hook shell du profil PowerShell (`~/.config/lean-ctx/shell-hook.ps1`), qui enveloppe `git`, `npm`, `curl`… dans les terminaux interactifs, n'est pas touché. Il ne se charge pas dans les shells des agents, dont la sortie est redirigée.
+Chaque script sauvegarde les fichiers qu'il modifie dans `~/lean-ctx-uninstall-backup-<date>/` ou `~/lean-ctx-fix-backup-<date>/`. Chaque copie est nommée d'après son chemin, par exemple `.claude__settings.json` (uninstall) ou `.claude_settings.json` (fix) pour `~/.claude/settings.json` : recopie-la à sa place d'origine. Pour réinstaller lean-ctx : `npm i -g lean-ctx-bin`, puis `lean-ctx setup`.

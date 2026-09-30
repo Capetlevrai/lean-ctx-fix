@@ -135,6 +135,12 @@ function Get-State {
   $s
 }
 
+# --- lean-ctx désinstallé : rien à « mettre à la demande »
+if ($Root -eq $HOME -and -not (Get-Command lean-ctx -ErrorAction SilentlyContinue)) {
+  Write-Host "$(Get-Date -Format s) lean-ctx-fix : lean-ctx n'est pas installé, rien à faire (voir uninstall.ps1 -Check)."
+  exit 0
+}
+
 # --- état avant
 $before = Get-State
 if ($Check) {
